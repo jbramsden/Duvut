@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!-- Rounded-square background -->
+  <rect width="128" height="128" rx="16" ry="16" fill="#0078BE"/>
+  
+  <!-- Left bracket -->
+  <path d="M50 40 L40 64 L50 88" stroke="#FFFFFF" stroke-width="8" fill="none" stroke-linecap="round"/>
+
+  <!-- Right bracket -->
+  <path d="M78 40 L88 64 L78 88" stroke="#FFFFFF" stroke-width="8" fill="none" stroke-linecap="round"/>
+
+  <!-- Central dot -->
+  <circle cx="64" cy="64" r="8" fill="#FFC20E"/>
+</svg>

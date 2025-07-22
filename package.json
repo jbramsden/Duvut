@@ -1,0 +1,175 @@
+{
+  "name": "duvut-assistant",
+  "displayName": "Duvut Assistant",
+  "description": "AI-powered autonomous coding assistant using Ollama",
+  "version": "1.0.0",
+  "publisher": "duvut-assistant",
+  "icon": "assets/icon-bw.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/duvut-assistant.git"
+  },
+  "homepage": "https://github.com/yourusername/duvut-assistant",
+  "engines": {
+    "vscode": "^1.84.0",
+    "node": ">=18.0.0"
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Programming Languages",
+    "Education"
+  ],
+  "keywords": [
+    "ollama",
+    "ai",
+    "coding",
+    "assistant",
+    "autonomous",
+    "llama",
+    "local"
+  ],
+  "activationEvents": [
+    "*"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "duvut-assistant-ActivityBar",
+          "title": "Duvut Code Assistant",
+          "icon": "assets/icon-bw.png"
+        }
+      ]
+    },
+    "views": {
+      "duvut-assistant-ActivityBar": [
+        {
+          "type": "webview",
+          "id": "duvut-assistant.SidebarProvider",
+          "name": "Duvut Assistant"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "duvut-assistant.newTask",
+        "title": "New Task",
+        "icon": "$(add)"
+      },
+      {
+        "command": "duvut-assistant.settings",
+        "title": "Settings",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "duvut-assistant.explainCode",
+        "title": "Explain Code",
+        "category": "Duvut Assistant"
+      },
+      {
+        "command": "duvut-assistant.improveCode",
+        "title": "Improve Code",
+        "category": "Duvut Assistant"
+      },
+      {
+        "command": "duvut-assistant.fixCode",
+        "title": "Fix Code",
+        "category": "Duvut Assistant"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "submenu": "duvut-assistant.contextMenu",
+          "group": "1"
+        }
+      ],
+      "duvut-assistant.contextMenu": [
+        {
+          "command": "duvut-assistant.explainCode",
+          "group": "1_actions@1"
+        },
+        {
+          "command": "duvut-assistant.improveCode",
+          "group": "1_actions@2"
+        },
+        {
+          "command": "duvut-assistant.fixCode",
+          "group": "1_actions@3"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "duvut-assistant.newTask",
+          "group": "navigation@1",
+          "when": "view == duvut-assistant.SidebarProvider"
+        },
+        {
+          "command": "duvut-assistant.settings",
+          "group": "navigation@2",
+          "when": "view == duvut-assistant.SidebarProvider"
+        }
+      ]
+    },
+    "submenus": [
+      {
+        "id": "duvut-assistant.contextMenu",
+        "label": "Duvut Assistant"
+      }
+    ],
+    "configuration": {
+      "title": "Duvut Assistant",
+      "properties": {
+        "duvut-assistant.ollamaBaseUrl": {
+          "type": "string",
+          "default": "http://localhost:11434",
+          "description": "Base URL for Ollama API"
+        },
+        "duvut-assistant.modelId": {
+          "type": "string",
+          "default": "llama3.2",
+          "description": "Ollama model to use"
+        },
+        "duvut-assistant.temperature": {
+          "type": "number",
+          "default": 0.1,
+          "minimum": 0,
+          "maximum": 2,
+          "description": "Temperature for model responses"
+        },
+        "duvut-assistant.maxTokens": {
+          "type": "number",
+          "default": 4000,
+          "description": "Maximum tokens for responses"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package",
+    "build": "npm run compile",
+    "dev": "npm run watch",
+    "bundle": "esbuild src/extension.ts --bundle --platform=node --external:vscode --outdir=dist"
+  },
+  "dependencies": {
+    "axios": "^1.7.4",
+    "cheerio": "^1.0.0",
+    "diff": "^5.2.0",
+    "fast-xml-parser": "^5.0.0",
+    "ignore": "^7.0.3",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/diff": "^5.2.1",
+    "@types/node": "20.x",
+    "@types/uuid": "^9.0.8",
+    "@types/vscode": "^1.84.0",
+    "@vscode/vsce": "^3.3.2",
+    "esbuild": "^0.25.5",
+    "typescript": "^5.4.5"
+  }
+}
