@@ -77,6 +77,21 @@
         "command": "duvut-assistant.fixCode",
         "title": "Fix Code",
         "category": "Duvut Assistant"
+      },
+      {
+        "command": "duvut-assistant.testCodeDetection",
+        "title": "Test Code Detection",
+        "category": "Duvut Assistant"
+      },
+      {
+        "command": "duvut-assistant.simulateLLMResponse",
+        "title": "Simulate LLM Response",
+        "category": "Duvut Assistant"
+      },
+      {
+        "command": "duvut-assistant.toggleCodeCompletion",
+        "title": "Toggle Code Completion",
+        "category": "Duvut Assistant"
       }
     ],
     "menus": {
@@ -143,6 +158,38 @@
           "type": "number",
           "default": 4000,
           "description": "Maximum tokens for responses"
+        },
+        "duvut-assistant.codeCompletion.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable AI-powered code completion suggestions"
+        },
+        "duvut-assistant.codeCompletion.debounceDelay": {
+          "type": "number",
+          "default": 500,
+          "minimum": 100,
+          "maximum": 2000,
+          "description": "Delay in milliseconds before triggering code completion (to avoid too many requests)"
+        },
+        "duvut-assistant.codeCompletion.maxSuggestionLength": {
+          "type": "number",
+          "default": 200,
+          "minimum": 50,
+          "maximum": 500,
+          "description": "Maximum length of AI-generated code suggestions"
+        },
+        "duvut-assistant.codeCompletion.triggerCharacters": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [".", "(", " ", "\n", ";", "{", "="],
+          "description": "Characters that trigger code completion suggestions"
+        },
+        "duvut-assistant.codeCompletion.modelId": {
+          "type": "string",
+          "default": "",
+          "description": "Ollama model to use for code completion suggestions (leave empty to use the main model)"
         }
       }
     }

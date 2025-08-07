@@ -104,9 +104,9 @@ export class OllamaClient {
         }
     }
 
-    async chat(messages: ChatMessage[]): Promise<string> {
+    async chat(messages: ChatMessage[], model: string): Promise<string> {
         const request: ChatRequest = {
-            model: this.getModelId(),
+            model: model,
             messages,
             stream: false,
             options: {
