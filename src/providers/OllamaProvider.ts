@@ -588,7 +588,14 @@ Remember: You have full access to the workspace and can read, write, and open fi
                 }
             }
             
-            // If we found a file path, add it as a recommendation
+            // If no explicit file path found, but we have a significant code block with a language,
+            // generate a default file name based on the language and content
+            if (!filePath && language && code.trim().length > 50) {
+                filePath = this._generateDefaultFileName(language, code, blockCount);
+                this._outputChannel.appendLine(`[DEBUG] Generated default file path: "${filePath}"`);
+            }
+            
+            // If we found or generated a file path, add it as a recommendation
             if (filePath) {
                 this._outputChannel.appendLine(`[DEBUG] Adding recommendation: ${filePath} (${language})`);
                 recommendations.push({
@@ -603,6 +610,115 @@ Remember: You have full access to the workspace and can read, write, and open fi
         
         this._outputChannel.appendLine(`[DEBUG] Detection complete. Found ${recommendations.length} recommendations`);
         return recommendations;
+    }
+
+    private _generateDefaultFileName(language: string, code: string, blockIndex: number): string {
+        // Map languages to common file extensions
+        const languageExtensions: { [key: string]: string } = {
+            'javascript': '.js',
+            'js': '.js',
+            'typescript': '.ts',
+            'ts': '.ts',
+            'python': '.py',
+            'py': '.py',
+            'go': '.go',
+            'golang': '.go',
+            'java': '.java',
+            'cpp': '.cpp',
+            'c': '.c',
+            'csharp': '.cs',
+            'cs': '.cs',
+            'php': '.php',
+            'ruby': '.rb',
+            'rb': '.rb',
+            'rust': '.rs',
+            'rs': '.rs',
+            'swift': '.swift',
+            'kotlin': '.kt',
+            'kt': '.kt',
+            'scala': '.scala',
+            'dart': '.dart',
+            'html': '.html',
+            'css': '.css',
+            'json': '.json',
+            'yaml': '.yaml',
+            'yml': '.yml',
+            'xml': '.xml',
+            'sql': '.sql',
+            'sh': '.sh',
+            'bash': '.sh',
+            'powershell': '.ps1',
+            'dockerfile': 'Dockerfile'
+        };
+        
+        const extension = languageExtensions[language.toLowerCase()] || '.txt';
+        
+        // Try to extract a meaningful name from the code content
+        let baseName = 'code';
+        
+        // Look for function names, class names, or package declarations
+        const codeLines = code.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+        
+        for (const line of codeLines) {
+            // Go: look for package declaration or main function
+            if (language.toLowerCase() === 'go') {
+                if (line.startsWith('package main')) {
+                    baseName = 'main';
+                    break;
+                } else if (line.startsWith('package ')) {
+                    const packageName = line.split(' ')[1];
+                    if (packageName && packageName.length > 0) {
+                        baseName = packageName;
+                        break;
+                    }
+                } else if (line.includes('func main(')) {
+                    baseName = 'main';
+                    break;
+                } else if (line.includes('func ')) {
+                    // Extract function name
+                    const funcMatch = line.match(/func\s+([a-zA-Z_][a-zA-Z0-9_]*)/);
+                    if (funcMatch) {
+                        baseName = funcMatch[1];
+                        break;
+                    }
+                }
+            }
+            
+            // JavaScript/TypeScript: look for function declarations
+            if (['javascript', 'js', 'typescript', 'ts'].includes(language.toLowerCase())) {
+                const funcMatch = line.match(/(?:function|const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/);
+                if (funcMatch) {
+                    baseName = funcMatch[1];
+                    break;
+                }
+            }
+            
+            // Python: look for class or function definitions
+            if (['python', 'py'].includes(language.toLowerCase())) {
+                const pyMatch = line.match(/(?:def|class)\s+([a-zA-Z_][a-zA-Z0-9_]*)/);
+                if (pyMatch) {
+                    baseName = pyMatch[1];
+                    break;
+                }
+            }
+            
+            // Java: look for class declarations
+            if (language.toLowerCase() === 'java') {
+                const classMatch = line.match(/(?:public\s+)?class\s+([a-zA-Z_][a-zA-Z0-9_]*)/);
+                if (classMatch) {
+                    baseName = classMatch[1];
+                    break;
+                }
+            }
+        }
+        
+        // Ensure the base name is valid for file systems
+        baseName = baseName.replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase();
+        if (!baseName || baseName.length === 0) {
+            baseName = `code${blockIndex}`;
+        }
+        
+        return baseName + extension;
     }
 
     private async _promptForCodeApplication(recommendations: Array<{filePath: string, code: string, language?: string}>) {
@@ -713,7 +829,7 @@ Remember: You have full access to the workspace and can read, write, and open fi
         const hasValidExtension = validExtensions.some(ext => path.endsWith(ext));
         const hasPathSeparator = path.includes('/') || path.includes('\\');
         
-        // More strict validation: must have a valid extension or be a clear path with separators
+        // More strict validation: must have a valid extension, clear path separators, or be a simple filename
         const looksLikeFileName = /^[a-zA-Z0-9_-]+(\.[a-zA-Z0-9_-]+)*$/.test(path);
         
         // Must either have a valid extension, clear path separators, or be a simple filename

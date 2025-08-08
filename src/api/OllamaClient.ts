@@ -130,9 +130,9 @@ export class OllamaClient {
         }
     }
 
-    async *chatStream(messages: ChatMessage[]): AsyncGenerator<string, void, unknown> {
+    async *chatStream(messages: ChatMessage[], model?: string): AsyncGenerator<string, void, unknown> {
         const request: ChatRequest = {
-            model: this.getModelId(),
+            model: model || this.getModelId(),
             messages,
             stream: true,
             options: {
