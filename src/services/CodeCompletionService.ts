@@ -215,33 +215,13 @@ File content: ${currentFile.content.substring(0, 1000)}...`;
         workspaceContext: string,
         currentExpression: string
     ): string {
-        return `You are an intelligent code completion assistant. Based on the context, suggest what should come next.
+        return `Complete this ${language} code with just the next line:
 
-Language: ${language}
-Workspace Context:
-${workspaceContext}
-
-Current code context:
 \`\`\`${language}
 ${contextText}
 \`\`\`
 
-Cursor position: Line ${position.line + 1}, Column ${position.character + 1}
-Current expression: "${currentExpression}"
-
-IMPORTANT: The user has already typed "${currentExpression}". Provide ONLY what should come AFTER this.
-- Do NOT repeat "${currentExpression}" in your suggestion
-- Do NOT include the current expression in your suggestion
-- Keep it concise (1-3 lines max)
-- Don't include explanations
-- Focus on the most likely next step
-
-Examples:
-- If user typed "func" → return " testHandler(w http.ResponseWriter, r *http.Request) {"
-- If user typed "http.HandleFunc(" → return '"/hello", func(w http.ResponseWriter, r *http.Request) {'
-- If user typed "const user = " → return "{ name: '', email: '' }"
-
-Suggestion:`;
+Next line after "${currentExpression}":`;
     }
 
     /**
@@ -252,7 +232,7 @@ Suggestion:`;
             const messages = [
                 {
                     role: 'system' as const,
-                    content: `You are a code completion assistant. Provide concise, accurate code suggestions based on context. Only return the code snippet, no explanations. IMPORTANT: Do NOT include the current expression in your suggestion.`
+                    content: `You are a code completion tool. Return ONLY raw code. NO text, NO explanations, NO descriptions, NO comments about what the code does.`
                 },
                 {
                     role: 'user' as const,
@@ -260,7 +240,9 @@ Suggestion:`;
                 }
             ];
 
-            const response = await this.ollamaClient.chat(messages, this.selectedModel);
+            const response = await this.ollamaClient.chat(messages, this.selectedModel, 10000); // 10 second timeout for code completion
+            
+            this.outputChannel.appendLine(`[CodeCompletion] Raw AI response: "${response}"`);
             
             // Clean up the response
             let suggestion = response.trim();
@@ -268,8 +250,34 @@ Suggestion:`;
             // Remove markdown code blocks if present
             suggestion = suggestion.replace(/```[\w]*\n?/g, '').replace(/```\n?/g, '');
             
+            // Remove explanatory text and descriptions
+            suggestion = suggestion.replace(/^(Based on|It seems like|Looking at|Given the context|Here's what|This would|Let me|To complete this|Here is|Here's)/i, '');
+            
+            // Remove sentences that are clearly explanations (contain "is a" or end with periods)
+            const lines = suggestion.split('\n');
+            const filteredLines = lines.filter(line => {
+                const trimmed = line.trim();
+                if (!trimmed) return false;
+                
+                // Skip lines that are clearly explanations
+                if (trimmed.match(/^(Here|This|The|It|You|We)\s/i)) return false;
+                if (trimmed.includes('is a complete') || trimmed.includes('snippet')) return false;
+                if (trimmed.match(/\.\s*$/)) return false; // ends with period
+                if (trimmed.includes('variable will be') || trimmed.includes('will be set')) return false;
+                
+                return true;
+            });
+            
+            suggestion = filteredLines.join('\n').trim();
+            
             // Remove leading/trailing whitespace and newlines
             suggestion = suggestion.trim();
+            
+            // If suggestion is too long (likely an explanation), reject it
+            if (suggestion.length > 300) {
+                this.outputChannel.appendLine(`[CodeCompletion] Suggestion too long (${suggestion.length} chars), likely explanation - rejecting`);
+                return '';
+            }
             
             // Remove the current expression if it appears at the beginning of the suggestion
             if (currentExpression && suggestion.toLowerCase().startsWith(currentExpression.toLowerCase())) {
@@ -281,7 +289,9 @@ Suggestion:`;
                 suggestion = suggestion.substring(0, this.maxSuggestionLength) + '...';
             }
 
-            this.outputChannel.appendLine(`[CodeCompletion] Generated suggestion: "${suggestion}"`);
+            this.outputChannel.appendLine(`[CodeCompletion] Filtered suggestion: "${suggestion}"`);
+            this.outputChannel.appendLine(`[CodeCompletion] Suggestion length: ${suggestion.length}`);
+            
             return suggestion;
 
         } catch (error) {

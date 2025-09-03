@@ -104,7 +104,7 @@ export class OllamaClient {
         }
     }
 
-    async chat(messages: ChatMessage[], model: string): Promise<string> {
+    async chat(messages: ChatMessage[], model: string, timeoutMs?: number): Promise<string> {
         const request: ChatRequest = {
             model: model,
             messages,
@@ -116,13 +116,17 @@ export class OllamaClient {
         };
 
         try {
-            const response = await this.client.post('/api/chat', request);
+            const config = timeoutMs ? { timeout: timeoutMs } : {};
+            const response = await this.client.post('/api/chat', request, config);
             return response.data.message?.content || 'No response received';
         } catch (error) {
             console.error('Error in chat request:', error);
             if (axios.isAxiosError(error)) {
                 if (error.code === 'ECONNREFUSED') {
                     throw new Error('Cannot connect to Ollama. Make sure Ollama is running on ' + this.baseUrl);
+                }
+                if (error.code === 'ECONNABORTED' && timeoutMs) {
+                    throw new Error(`Request timeout after ${timeoutMs}ms - try using a faster model for code completion`);
                 }
                 throw new Error(`Ollama API error: ${error.response?.data?.error || error.message}`);
             }
