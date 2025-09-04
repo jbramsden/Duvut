@@ -1,6 +1,8 @@
-# Duvet Assistant
+![Duvut logo <.>](https://github.com/jbramsden/duvut/assets/icon.png?raw=true)
+# Duvut Assistant
 
-An AI-powered autonomous coding assistant for VS Code that uses Duvut for local AI inference.
+An AI-powered autonomous coding assistant for VS Code that uses Duvut for local AI inference. Developed by [DVT](https://www.dvtsoftware.com) 
+
 
 ## Features
 
