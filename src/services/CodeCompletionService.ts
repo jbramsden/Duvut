@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { OllamaClient } from '../api/OllamaClient';
+import { DebugService } from './DebugService';
 
 export interface CompletionSuggestion {
     text: string;
@@ -12,6 +13,7 @@ export interface CompletionSuggestion {
 export class CodeCompletionService {
     private ollamaClient: OllamaClient;
     private outputChannel: vscode.OutputChannel;
+    private debugService: DebugService;
     private isProcessing: boolean = false;
     private lastRequestTime: number = 0;
 
@@ -44,8 +46,9 @@ export class CodeCompletionService {
     }
 
     constructor(outputChannel: vscode.OutputChannel) {
-        this.ollamaClient = new OllamaClient();
+        this.ollamaClient = new OllamaClient(outputChannel);
         this.outputChannel = outputChannel;
+        this.debugService = DebugService.getInstance(outputChannel);
     }
 
     /**
@@ -57,14 +60,27 @@ export class CodeCompletionService {
         context: vscode.CompletionContext
     ): Promise<vscode.CompletionItem[]> {
         try {
+            this.debugService.log('getSuggestions', 'Starting code completion request', {
+                fileName: document.fileName,
+                language: document.languageId,
+                position: { line: position.line, character: position.character },
+                triggerKind: context.triggerKind
+            });
+
             // Check if code completion is enabled
             if (!this.isEnabled) {
+                this.debugService.log('getSuggestions', 'Code completion disabled');
                 return [];
             }
 
             // Debounce requests to avoid overwhelming the LLM
             const now = Date.now();
             if (this.isProcessing || (now - this.lastRequestTime) < this.debounceDelay) {
+                this.debugService.log('getSuggestions', 'Request debounced or already processing', {
+                    isProcessing: this.isProcessing,
+                    timeSinceLastRequest: now - this.lastRequestTime,
+                    debounceDelay: this.debounceDelay
+                });
                 return [];
             }
 
@@ -80,26 +96,38 @@ export class CodeCompletionService {
             
             // Get the current expression being typed
             const currentExpression = this.getCurrentExpression(document, position);
-            this.outputChannel.appendLine(`[CodeCompletion] Current expression: "${currentExpression}"`);
+            this.debugService.log('getSuggestions', 'Context analysis complete', {
+                contextTextLength: contextText.length,
+                workspaceContextLength: workspaceContext.length,
+                currentExpression: currentExpression
+            });
             
             // Create prompt for code completion
             const prompt = this.createCompletionPrompt(contextText, position, document.languageId, workspaceContext, currentExpression);
+            this.debugService.log('getSuggestions', 'Created completion prompt', {
+                promptLength: prompt.length,
+                model: this.selectedModel
+            });
             
             // Get suggestion from Ollama
-            this.outputChannel.appendLine(`[CodeCompletion] Using model: ${this.selectedModel}`);
             const suggestion = await this.getSuggestionFromOllama(prompt, document.languageId, currentExpression);
             
             if (suggestion && suggestion.trim()) {
-                this.outputChannel.appendLine(`[CodeCompletion] Creating completion item for: "${suggestion}"`);
+                this.debugService.log('getSuggestions', 'Received suggestion from Ollama', {
+                    suggestion: suggestion.substring(0, 100) + (suggestion.length > 100 ? '...' : ''),
+                    suggestionLength: suggestion.length
+                });
                 const completionItem = this.createCompletionItem(suggestion, position, currentExpression);
                 this.isProcessing = false;
                 return [completionItem];
             }
 
+            this.debugService.log('getSuggestions', 'No suggestion received from Ollama');
             this.isProcessing = false;
             return [];
 
         } catch (error) {
+            this.debugService.log('getSuggestions', 'Error occurred during code completion', error);
             this.outputChannel.appendLine(`[CodeCompletion] Error: ${error}`);
             this.isProcessing = false;
             return [];

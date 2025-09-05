@@ -1,5 +1,6 @@
 import axios, { AxiosInstance } from 'axios';
 import * as vscode from 'vscode';
+import { DebugService } from '../services/DebugService';
 
 export interface OllamaModel {
     name: string;
@@ -51,8 +52,9 @@ export interface ChatRequest {
 export class OllamaClient {
     private client: AxiosInstance;
     private baseUrl: string;
+    private debugService?: DebugService;
 
-    constructor() {
+    constructor(outputChannel?: vscode.OutputChannel) {
         this.baseUrl = this.getBaseUrl();
         this.client = axios.create({
             baseURL: this.baseUrl,
@@ -61,6 +63,11 @@ export class OllamaClient {
                 'Content-Type': 'application/json',
             },
         });
+        
+        // Initialize debug service if output channel is provided
+        if (outputChannel) {
+            this.debugService = DebugService.getInstance(outputChannel);
+        }
     }
 
     private getBaseUrl(): string {
@@ -85,9 +92,12 @@ export class OllamaClient {
 
     async listModels(): Promise<OllamaModel[]> {
         try {
+            this.debugService?.logOllamaRequest('listModels', {}, '/api/tags');
             const response = await this.client.get('/api/tags');
+            this.debugService?.logOllamaResponse('listModels', response.data, '/api/tags');
             return response.data.models || [];
         } catch (error) {
+            this.debugService?.logOllamaError('listModels', error, '/api/tags');
             console.error('Error listing models:', error);
             throw new Error('Failed to connect to Ollama. Make sure Ollama is running.');
         }
@@ -95,10 +105,13 @@ export class OllamaClient {
 
     async checkConnection(): Promise<boolean> {
         try {
+            this.debugService?.log('checkConnection', 'Checking Ollama connection');
             await this.listModels();
+            this.debugService?.log('checkConnection', 'Successfully connected to Ollama');
             console.info('Connected to Ollama')
             return true;
         } catch (error) {
+            this.debugService?.log('checkConnection', 'Failed to connect to Ollama', error);
             console.error('Failed to connect to Ollama', error)
             return false;
         }
@@ -115,11 +128,27 @@ export class OllamaClient {
             },
         };
 
+        // Log system prompts and all messages
+        messages.forEach((msg, index) => {
+            if (msg.role === 'system') {
+                this.debugService?.logSystemPrompt('chat', msg.content);
+            } else {
+                this.debugService?.logChatMessage('chat', msg, 'sent');
+            }
+        });
+
+        this.debugService?.logOllamaRequest('chat', request, '/api/chat');
+
         try {
             const config = timeoutMs ? { timeout: timeoutMs } : {};
             const response = await this.client.post('/api/chat', request, config);
+            
+            this.debugService?.logOllamaResponse('chat', response.data, '/api/chat');
+            this.debugService?.logChatMessage('chat', response.data.message, 'received');
+            
             return response.data.message?.content || 'No response received';
         } catch (error) {
+            this.debugService?.logOllamaError('chat', error, '/api/chat');
             console.error('Error in chat request:', error);
             if (axios.isAxiosError(error)) {
                 if (error.code === 'ECONNREFUSED') {
@@ -145,12 +174,24 @@ export class OllamaClient {
             },
         };
 
+        // Log system prompts and all messages
+        messages.forEach((msg, index) => {
+            if (msg.role === 'system') {
+                this.debugService?.logSystemPrompt('chatStream', msg.content);
+            } else {
+                this.debugService?.logChatMessage('chatStream', msg, 'sent');
+            }
+        });
+
+        this.debugService?.logOllamaRequest('chatStream', request, '/api/chat');
+
         try {
             const response = await this.client.post('/api/chat', request, {
                 responseType: 'stream',
             });
 
             let buffer = '';
+            let streamedContent = '';
             
             for await (const chunk of response.data) {
                 buffer += chunk.toString();
@@ -162,9 +203,14 @@ export class OllamaClient {
                         try {
                             const data = JSON.parse(line);
                             if (data.message?.content) {
+                                streamedContent += data.message.content;
                                 yield data.message.content;
                             }
                             if (data.done) {
+                                this.debugService?.log('chatStream', 'Stream completed', {
+                                    totalContent: streamedContent,
+                                    finalResponse: data
+                                });
                                 return;
                             }
                         } catch (parseError) {
@@ -174,24 +220,37 @@ export class OllamaClient {
                 }
             }
         } catch (error) {
+            this.debugService?.logOllamaError('chatStream', error, '/api/chat');
             console.error('Error in chat stream request:', error);
             throw error;
         }
     }
 
     async generateCompletion(prompt: string): Promise<string> {
+        const request = {
+            model: this.getModelId(),
+            prompt,
+            stream: false,
+            options: {
+                temperature: this.getTemperature(),
+                num_predict: this.getMaxTokens(),
+            },
+        };
+
+        this.debugService?.log('generateCompletion', 'Generating completion', { prompt });
+        this.debugService?.logOllamaRequest('generateCompletion', request, '/api/generate');
+
         try {
-            const response = await this.client.post('/api/generate', {
-                model: this.getModelId(),
-                prompt,
-                stream: false,
-                options: {
-                    temperature: this.getTemperature(),
-                    num_predict: this.getMaxTokens(),
-                },
+            const response = await this.client.post('/api/generate', request);
+            
+            this.debugService?.logOllamaResponse('generateCompletion', response.data, '/api/generate');
+            this.debugService?.log('generateCompletion', 'Generated completion', { 
+                response: response.data.response 
             });
+            
             return response.data.response || 'No response received';
         } catch (error) {
+            this.debugService?.logOllamaError('generateCompletion', error, '/api/generate');
             console.error('Error in generate request:', error);
             throw error;
         }

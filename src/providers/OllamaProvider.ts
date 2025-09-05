@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { OllamaClient, ChatMessage } from '../api/OllamaClient';
 import { ToolsService } from '../tools/ToolsService';
+import { DebugService } from '../services/DebugService';
 
 interface WebviewMessage {
     type: string;
@@ -11,6 +12,7 @@ export class OllamaProvider implements vscode.WebviewViewProvider {
     private _view?: vscode.WebviewView;
     private ollamaClient: OllamaClient;
     private toolsService: ToolsService;
+    private debugService: DebugService;
     private chatHistory: ChatMessage[] = [];
     private selectedModel: string = 'llama3.2:latest';
     private pendingRecommendations: Map<string, Array<{filePath: string, code: string, language?: string, lineNumbers?: string[]}>> = new Map();
@@ -21,9 +23,9 @@ export class OllamaProvider implements vscode.WebviewViewProvider {
         private readonly _extensionContext: vscode.ExtensionContext,
         private readonly _outputChannel: vscode.OutputChannel
     ) {
-        this.ollamaClient = new OllamaClient();
-        this.toolsService = new ToolsService(this._outputChannel);  
-       
+        this.ollamaClient = new OllamaClient(this._outputChannel);
+        this.toolsService = new ToolsService(this._outputChannel);
+        this.debugService = DebugService.getInstance(this._outputChannel);
     }
 
     dispose() {
@@ -39,7 +41,7 @@ export class OllamaProvider implements vscode.WebviewViewProvider {
     ) {
         // Clean up previous webview if it exists
         if (this._view) {
-            this._outputChannel.appendLine(`[DEBUG] Cleaning up previous webview`);
+            this.debugService.log('resolveWebviewView', 'Cleaning up previous webview');
             this._disposables.forEach(d => d.dispose());
             this._disposables = [];
         }
@@ -65,7 +67,7 @@ export class OllamaProvider implements vscode.WebviewViewProvider {
 
         // Handle webview disposal
         const disposeListener = webviewView.onDidDispose(() => {
-            this._outputChannel.appendLine(`[DEBUG] Webview disposed`);
+            this.debugService.log('resolveWebviewView', 'Webview disposed');
             this._view = undefined;
             this._disposables.forEach(d => d.dispose());
             this._disposables = [];
@@ -156,15 +158,20 @@ export class OllamaProvider implements vscode.WebviewViewProvider {
         try {
             // Generate unique request ID for this conversation
             this.currentRequestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            this._outputChannel.appendLine(`[DEBUG] Starting new request: ${this.currentRequestId}`);
+            this.debugService.log('_handleChatMessage', `Starting new request: ${this.currentRequestId}`, {
+                content: content.substring(0, 200) + (content.length > 200 ? '...' : ''),
+                model: model
+            });
             
             // Add user message to history
             this.chatHistory.push({ role: 'user', content: content });
             
             // Get workspace context
             const context = await this._getWorkspaceContext();
-            this._outputChannel.appendLine(`[DEBUG] Workspace context length: ${context.length}`);
-            this._outputChannel.appendLine(`[DEBUG] Workspace context preview: ${context.substring(0, 200)}...`);
+            this.debugService.log('_handleChatMessage', 'Workspace context retrieved', {
+                contextLength: context.length,
+                contextPreview: context.substring(0, 200) + (context.length > 200 ? '...' : '')
+            });
             
             // Prepare messages for Ollama
             const messages: ChatMessage[] = [
@@ -173,10 +180,15 @@ export class OllamaProvider implements vscode.WebviewViewProvider {
             ];
             
             if (context) {
-                messages.splice(1, 0, { role: 'user' as const, content: `Workspace Context:\n${context}\n\nUser Request:\n${content}` });
-                this._outputChannel.appendLine(`[DEBUG] Added workspace context to messages`);
+                const contextMessage = `Workspace Context:\n${context}\n\nUser Request:\n${content}`;
+                messages.splice(1, 0, { role: 'user' as const, content: contextMessage });
+                this.debugService.log('_handleChatMessage', 'Added workspace context to messages', {
+                    contextMessageLength: contextMessage.length,
+                    contextContainsFileContent: context.includes('File content:'),
+                    contextContainsCode: context.includes('```')
+                });
             } else {
-                this._outputChannel.appendLine(`[DEBUG] No workspace context available`);
+                this.debugService.log('_handleChatMessage', 'No workspace context available');
             }
             
             // Send user message to webview
@@ -288,23 +300,27 @@ export class OllamaProvider implements vscode.WebviewViewProvider {
 
     private async _checkOllamaConnection() {
         if (!this._view) {
-            this._outputChannel.appendLine('Error: Webview not initialized for checkOllamaConnection.');
+            this.debugService.log('_checkOllamaConnection', 'Error: Webview not initialized for checkOllamaConnection');
             return;
         }
         
-        this._outputChannel.appendLine(`[DEBUG] Starting Ollama connection check`);
-        this._outputChannel.appendLine(`[DEBUG] Webview available: ${!!this._view}`);
-        this._outputChannel.appendLine(`[DEBUG] Webview webview available: ${!!this._view.webview}`);
+        this.debugService.log('_checkOllamaConnection', 'Starting Ollama connection check', {
+            webviewAvailable: !!this._view,
+            webviewWebviewAvailable: !!this._view.webview
+        });
         
         // Wait a bit more to ensure webview is fully ready
         await new Promise(resolve => setTimeout(resolve, 200));
         
         try {
             const isConnected = await this.ollamaClient.checkConnection();
-            this._outputChannel.appendLine(`[DEBUG] Ollama connection check result: ${isConnected}`);
+            this.debugService.log('_checkOllamaConnection', 'Ollama connection check result', { isConnected });
             
             const models = isConnected ? await this.ollamaClient.listModels() : [];
-            this._outputChannel.appendLine(`[DEBUG] Found ${models.length} models`);
+            this.debugService.log('_checkOllamaConnection', 'Found models', { 
+                modelCount: models.length,
+                models: models.map(m => m.name)
+            });
             
             const msg = {
                 type: 'connectionStatus',
@@ -312,32 +328,25 @@ export class OllamaProvider implements vscode.WebviewViewProvider {
                 models: models.map(m => m.name)
             };
             
-            this._outputChannel.appendLine(`[DEBUG] Sending to webview: ${JSON.stringify(msg)}`);
-            this._outputChannel.appendLine(`[DEBUG] About to call this._view.webview.postMessage`);
+            this.debugService.log('_checkOllamaConnection', 'Sending connection status to webview', msg);
             
             // Double-check webview is still available before sending
             if (!this._view || !this._view.webview) {
-                this._outputChannel.appendLine(`[DEBUG] Webview no longer available, aborting message send`);
+                this.debugService.log('_checkOllamaConnection', 'Webview no longer available, aborting message send');
                 return;
             }
             
             this._view.webview.postMessage(msg);
-            
-            this._outputChannel.appendLine(`[DEBUG] postMessage called successfully`);
-            
-            // Verify the message was sent
-            setTimeout(() => {
-                this._outputChannel.appendLine(`[DEBUG] Post-message verification - webview still available: ${!!this._view}`);
-            }, 100);
+            this.debugService.log('_checkOllamaConnection', 'Connection status sent to webview successfully');
             
         } catch (error) {
-            this._outputChannel.appendLine(`[DEBUG] Error in connection check: ${error}`);
+            this.debugService.log('_checkOllamaConnection', 'Error in connection check', error);
             const msg = {
                 type: 'connectionStatus',
                 connected: false,
                 error: error instanceof Error ? error.message : 'Connection failed'
             };
-            this._outputChannel.appendLine(`[DEBUG] Sending error message to webview: ${JSON.stringify(msg)}`);
+            this.debugService.log('_checkOllamaConnection', 'Sending error message to webview', msg);
             if (this._view && this._view.webview) {
                 this._view.webview.postMessage(msg);
             }
@@ -456,7 +465,15 @@ export class OllamaProvider implements vscode.WebviewViewProvider {
     }
 
     private _getSystemPrompt(): string {
-        return `You are a powerful agentic AI coding assistant, working for the famous, highly skilled software development company DVT. You operate exclusively in Duvut, a brilliant IDE developed by DVT to be used by its employees and customers.
+        const model = this.selectedModel.toLowerCase();
+        
+        this.debugService.log('_getSystemPrompt', 'Generating system prompt for model', { 
+            model: this.selectedModel,
+            modelLower: model 
+        });
+        
+        // Common core system prompt
+        const commonPrompt = `You are a powerful agentic AI coding assistant, working for the famous, highly skilled software development company DVT. You operate exclusively in Duvut, a brilliant IDE developed by DVT to be used by its employees and customers.
 
 You are pair programming with a USER to solve their coding task.
 The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.
@@ -464,7 +481,47 @@ Each time the USER sends a message, we may automatically attach some information
 This information may or may not be relevant to the coding task, it is up for you to decide.
 Your main goal is to follow the USER's instructions at each message.
 
-**CRITICAL**: Always pay attention to the current file context provided in the workspace information. If the user has a specific file open (like main.py, main.go, etc.), you MUST respond in the same language and target that file. Do NOT switch languages or create files in different languages unless explicitly requested.
+**CRITICAL**: Always pay attention to the current file context provided in the workspace information. If the user has a specific file open (like main.py, main.go, etc.), you MUST respond in the same language and target that file. Do NOT switch languages or create files in different languages unless explicitly requested.`;
+
+        // Model-specific adaptations
+        let modelSpecificPrompt = '';
+        
+        if (model.includes('qwen') || model.includes('coder')) {
+            // Qwen models (especially coder variants) need more explicit instructions about workspace access
+            this.debugService.log('_getSystemPrompt', 'Using Qwen-specific prompt');
+            modelSpecificPrompt = `
+
+**WORKSPACE ACCESS FOR QWEN MODELS**: You have full access to the current workspace and file content. The workspace context provided in the user message contains the actual file content that you can analyze and work with. When a user asks you to review, analyze, or work with code, the code is already available to you in the workspace context. You do NOT need to ask the user to provide the code - it's already there for you to analyze.
+
+**IMPORTANT FOR QWEN**: The workspace context includes the current file content. You can see and analyze the code that is currently open in the editor. Work directly with the code provided in the context.`;
+        } else if (model.includes('llama') || model.includes('meta')) {
+            // Llama models generally understand context well
+            this.debugService.log('_getSystemPrompt', 'Using Llama-specific prompt');
+            modelSpecificPrompt = `
+
+**WORKSPACE ACCESS**: You have access to the current workspace context, which includes the current file content provided in the user message. When analyzing code, work with the content provided in the workspace context.`;
+        } else if (model.includes('deepseek') || model.includes('deep')) {
+            // Deepseek models are good at following instructions
+            this.debugService.log('_getSystemPrompt', 'Using Deepseek-specific prompt');
+            modelSpecificPrompt = `
+
+**WORKSPACE CONTEXT**: You can access the current file content through the workspace context provided in the user message. Analyze and work with the code that is available in the context.`;
+        } else if (model.includes('codellama') || model.includes('code')) {
+            // Code-specific models
+            this.debugService.log('_getSystemPrompt', 'Using CodeLlama-specific prompt');
+            modelSpecificPrompt = `
+
+**CODE ANALYSIS**: You have access to the current file content through the workspace context. The code you need to analyze is provided in the user message. Work directly with this code.`;
+        } else {
+            // Default for unknown models
+            this.debugService.log('_getSystemPrompt', 'Using default prompt for unknown model');
+            modelSpecificPrompt = `
+
+**WORKSPACE ACCESS**: You have access to the current file content through the workspace context provided in the user message. When a user asks you to review or analyze code, the code is already available to you in the workspace context.`;
+        }
+
+        // Add the rest of the common system prompt
+        const restOfPrompt = `
 
 <communication>
 1. Be conversational but professional.
@@ -477,24 +534,23 @@ Your main goal is to follow the USER's instructions at each message.
 
 <workspace_context>
 You have access to the current workspace context, which includes:
-- The current open file and its content
+- The current open file and its content (provided in the user message)
 - Any selected text in the editor
 - Workspace folder information
-- The ability to read, write, and open files
+- File listings and basic workspace structure
 
 **IMPORTANT**: The workspace context will show you the current file that is open. You MUST respond in the same programming language as the current file. For example:
 - If the current file is main.py (Python), respond with Python code
 - If the current file is main.go (Go), respond with Go code
 - If the current file is index.js (JavaScript), respond with JavaScript code
 
-When you need to access additional files in the workspace, you can use the following tool calls:
+**CRITICAL**: You DO have access to the current file content - it is provided in the workspace context within the user message. You can see and analyze the code that is currently open in the editor. When the user asks you to review code, analyze code, or make suggestions, you should work with the code that is provided in the workspace context.
 
-1. To read a file: <read_file>filepath</read_file>
-2. To write to a file: <write_file>filepath\ncontent</write_file>
-3. To open a file in VS Code: <open_file>filepath</open_file>
+The workspace context contains the actual file content that you can analyze and work with. You do NOT need to ask the user to provide the code - it's already available to you in the context.
+</workspace_context>`;
 
-Always use these tool calls when you need to access workspace files during your thinking process.
-</workspace_context>
+        // Add the rest of the common system prompt
+        const codeRecommendations = `
 
 <code_recommendations>
 When you make code recommendations that should be applied to files, format them as follows:
@@ -587,6 +643,8 @@ When debugging:
 </debugging>
 
 Remember: You have full access to the workspace and can read, write, and open files as needed to help the user with their coding tasks.`;
+
+        return commonPrompt + modelSpecificPrompt + restOfPrompt + codeRecommendations;
     }
 
     private async _processToolCall(toolCall: string, toolType: string) {

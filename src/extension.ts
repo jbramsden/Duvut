@@ -2,12 +2,16 @@ import * as vscode from 'vscode';
 import { OllamaProvider } from './providers/OllamaProvider';
 import { CodeCompletionProvider } from './providers/CodeCompletionProvider';
 import { registerCommands } from './commands/registerCommands';
+import { DebugService } from './services/DebugService';
 
 let outputChannel: vscode.OutputChannel;
 
 export async function activate(context: vscode.ExtensionContext) {
     outputChannel = vscode.window.createOutputChannel('Duvut Assistant');
     context.subscriptions.push(outputChannel);
+    
+    // Initialize debug service
+    const debugService = DebugService.getInstance(outputChannel);
     
     outputChannel.appendLine('Duvut Assistant extension activated');
 
@@ -25,7 +29,7 @@ export async function activate(context: vscode.ExtensionContext) {
     );
 
     // Register all commands
-    registerCommands(context, provider);
+    registerCommands(context, provider, outputChannel);
 
     // Register code completion provider
     const completionProvider = new CodeCompletionProvider(outputChannel);

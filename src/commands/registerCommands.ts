@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import { OllamaProvider } from '../providers/OllamaProvider';
+import { DebugService } from '../services/DebugService';
 
-export function registerCommands(context: vscode.ExtensionContext, provider: OllamaProvider) {
+export function registerCommands(context: vscode.ExtensionContext, provider: OllamaProvider, outputChannel: vscode.OutputChannel) {
     context.subscriptions.push(
         vscode.commands.registerCommand('duvut-assistant.newTask', () => {
             // Focus the sidebar to start a new conversation
@@ -219,6 +220,24 @@ server:
                 console.log(`Content length: ${activeEditor.document.getText().length}`);
             } else {
                 vscode.window.showWarningMessage('No active editor found');
+            }
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('duvut-assistant.toggleDebugMode', () => {
+            const config = vscode.workspace.getConfiguration('duvut-assistant.debug');
+            const currentEnabled = config.get('enabled', false);
+            const newEnabled = !currentEnabled;
+            
+            config.update('enabled', newEnabled, vscode.ConfigurationTarget.Global);
+            
+            const status = newEnabled ? 'enabled' : 'disabled';
+            vscode.window.showInformationMessage(`Duvut Assistant debug mode ${status}`);
+            
+            // Show the output channel when debug is enabled
+            if (newEnabled) {
+                outputChannel.show();
             }
         })
     );
