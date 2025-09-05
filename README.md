@@ -3,6 +3,7 @@
 
 An AI-powered autonomous coding assistant for VS Code that uses Ollama for local AI inference. Developed by [DVT](https://www.dvtsoftware.com) 
 
+![Duvut screenshot](https://github.com/jbramsden/Duvut/blob/master/assets/Duvut_Screenshot.png?raw=true)
 
 ## Features
 
