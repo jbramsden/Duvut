@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { OllamaProvider } from '../providers/OllamaProvider';
 import { DebugService } from '../services/DebugService';
+import { TestService } from '../services/TestService';
 
 export function registerCommands(context: vscode.ExtensionContext, provider: OllamaProvider, outputChannel: vscode.OutputChannel) {
     context.subscriptions.push(
@@ -238,6 +239,174 @@ server:
             // Show the output channel when debug is enabled
             if (newEnabled) {
                 outputChannel.show();
+            }
+        })
+    );
+
+    // Testing Facility Commands
+    context.subscriptions.push(
+        vscode.commands.registerCommand('duvut-assistant.openToolTesting', () => {
+            vscode.commands.executeCommand('workbench.view.extension.duvut-assistant-TestProvider');
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('duvut-assistant.runAllToolTests', async () => {
+            const testService = TestService.getInstance(outputChannel, context);
+            try {
+                vscode.window.showInformationMessage('Running all tool tests... This may take a while.');
+                const summaries = await testService.runAllTests();
+                
+                const totalModels = summaries.size;
+                let totalTests = 0;
+                let totalPassed = 0;
+                
+                for (const [modelName, summary] of summaries) {
+                    totalTests += summary.totalTests;
+                    totalPassed += summary.passedTests;
+                }
+                
+                const successRate = totalTests > 0 ? Math.round((totalPassed / totalTests) * 100) : 0;
+                
+                vscode.window.showInformationMessage(
+                    `Tool testing completed! ${totalPassed}/${totalTests} tests passed (${successRate}%) across ${totalModels} models. Check the Tool Testing panel for detailed results.`
+                );
+            } catch (error) {
+                vscode.window.showErrorMessage(`Failed to run tool tests: ${error}`);
+            }
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('duvut-assistant.runQuickToolTest', async () => {
+            const testService = TestService.getInstance(outputChannel, context);
+            try {
+                const models = await testService.getAvailableModels();
+                if (models.length === 0) {
+                    vscode.window.showWarningMessage('No models available. Make sure Ollama is running.');
+                    return;
+                }
+
+                // Run a quick test with the first available model
+                const firstModel = models[0];
+                const testSuites = testService.getTestSuites();
+                if (testSuites.length === 0) {
+                    vscode.window.showWarningMessage('No test suites available.');
+                    return;
+                }
+
+                vscode.window.showInformationMessage(`Running quick test with ${firstModel.name}...`);
+                const results = await testService.runTestSuite(testSuites[0].id, firstModel.name);
+                
+                const passed = results.filter(r => r.success).length;
+                const total = results.length;
+                
+                vscode.window.showInformationMessage(
+                    `Quick test completed! ${passed}/${total} tests passed with ${firstModel.name}. Check the Tool Testing panel for details.`
+                );
+            } catch (error) {
+                vscode.window.showErrorMessage(`Failed to run quick test: ${error}`);
+            }
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('duvut-assistant.showTestResults', async () => {
+            const testService = TestService.getInstance(outputChannel, context);
+            const results = testService.getAllTestResults();
+            
+            if (results.size === 0) {
+                vscode.window.showInformationMessage('No test results available. Run some tests first.');
+                return;
+            }
+
+            // Show a summary of results
+            let summary = 'Tool Test Results Summary:\n\n';
+            for (const [key, testResults] of results) {
+                const [suiteId, modelName] = key.split('-');
+                const passed = testResults.filter(r => r.success).length;
+                const total = testResults.length;
+                summary += `${modelName} (${suiteId}): ${passed}/${total} passed\n`;
+            }
+            
+            vscode.window.showInformationMessage(summary);
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('duvut-assistant.exportTestResults', async () => {
+            const testService = TestService.getInstance(outputChannel, context);
+            try {
+                const format = await vscode.window.showQuickPick(['JSON', 'CSV', 'HTML'], {
+                    placeHolder: 'Select export format'
+                });
+                
+                if (!format) return;
+                
+                const formatLower = format.toLowerCase() as 'json' | 'csv' | 'html';
+                const includeHistory = await vscode.window.showQuickPick(['Yes', 'No'], {
+                    placeHolder: 'Include test history?'
+                });
+                
+                if (includeHistory === undefined) return;
+                
+                vscode.window.showInformationMessage('Exporting test results...');
+                const exportPath = await testService.exportResults(formatLower, includeHistory === 'Yes');
+                
+                vscode.window.showInformationMessage(`Test results exported to: ${exportPath}`);
+                
+                // Open the exported file
+                const document = await vscode.workspace.openTextDocument(exportPath);
+                await vscode.window.showTextDocument(document);
+            } catch (error) {
+                vscode.window.showErrorMessage(`Failed to export test results: ${error}`);
+            }
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('duvut-assistant.showTestStatistics', async () => {
+            const testService = TestService.getInstance(outputChannel, context);
+            const stats = testService.getTestStatistics();
+            
+            if (!stats) {
+                vscode.window.showInformationMessage('No test statistics available. Run some tests first.');
+                return;
+            }
+            
+            const message = `Test Statistics:
+• Total Test Runs: ${stats.totalTestRuns}
+• Total Tests: ${stats.totalTests}
+• Average Success Rate: ${Math.round(stats.averageSuccessRate)}%
+• Most Tested Model: ${stats.mostTestedModel}
+• Least Tested Model: ${stats.leastTestedModel}
+• Average Execution Time: ${Math.round(stats.averageExecutionTime)}ms`;
+            
+            vscode.window.showInformationMessage(message);
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('duvut-assistant.debugToolExecution', async () => {
+            const testService = TestService.getInstance(outputChannel, context);
+            try {
+                // Test the readFile tool directly
+                const testPrompt = 'Please read the file "package.json" and tell me what the main entry point is.';
+                const toolResult = await (testService as any).executeToolFunction('readFile', testPrompt);
+                
+                const message = `Tool Execution Debug:
+• Tool: readFile
+• Success: ${toolResult.success}
+• Path: ${toolResult.path}
+• Content Length: ${toolResult.content?.length || 0}
+• Content Preview: ${toolResult.content?.substring(0, 200) || 'No content'}...`;
+                
+                vscode.window.showInformationMessage(message);
+                outputChannel.appendLine('=== TOOL EXECUTION DEBUG ===');
+                outputChannel.appendLine(JSON.stringify(toolResult, null, 2));
+                outputChannel.show();
+            } catch (error) {
+                vscode.window.showErrorMessage(`Tool execution debug failed: ${error}`);
             }
         })
     );

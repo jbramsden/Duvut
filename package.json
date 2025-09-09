@@ -2,7 +2,7 @@
   "name": "duvut-assistant",
   "displayName": "Duvut Assistant",
   "description": "AI-powered autonomous coding assistant using Ollama",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "publisher": "duvut-assistant",
   "icon": "assets/icon-bw.png",
   "repository": {
@@ -49,6 +49,11 @@
           "type": "webview",
           "id": "duvut-assistant.SidebarProvider",
           "name": "Duvut Assistant"
+        },
+        {
+          "type": "webview",
+          "id": "duvut-assistant-TestProvider",
+          "name": "Tool Testing"
         }
       ]
     },
@@ -96,6 +101,41 @@
       {
         "command": "duvut-assistant.toggleDebugMode",
         "title": "Toggle Debug Mode",
+        "category": "Duvut Assistant"
+      },
+      {
+        "command": "duvut-assistant.openToolTesting",
+        "title": "Open Tool Testing",
+        "category": "Duvut Assistant"
+      },
+      {
+        "command": "duvut-assistant.runAllToolTests",
+        "title": "Run All Tool Tests",
+        "category": "Duvut Assistant"
+      },
+      {
+        "command": "duvut-assistant.runQuickToolTest",
+        "title": "Run Quick Tool Test",
+        "category": "Duvut Assistant"
+      },
+      {
+        "command": "duvut-assistant.showTestResults",
+        "title": "Show Test Results",
+        "category": "Duvut Assistant"
+      },
+      {
+        "command": "duvut-assistant.exportTestResults",
+        "title": "Export Test Results",
+        "category": "Duvut Assistant"
+      },
+      {
+        "command": "duvut-assistant.showTestStatistics",
+        "title": "Show Test Statistics",
+        "category": "Duvut Assistant"
+      },
+      {
+        "command": "duvut-assistant.debugToolExecution",
+        "title": "Debug Tool Execution",
         "category": "Duvut Assistant"
       }
     ],

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { OllamaProvider } from './providers/OllamaProvider';
 import { CodeCompletionProvider } from './providers/CodeCompletionProvider';
+import { TestProvider } from './webview/TestProvider';
 import { registerCommands } from './commands/registerCommands';
 import { DebugService } from './services/DebugService';
 
@@ -24,6 +25,17 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.window.registerWebviewViewProvider(
             'duvut-assistant.SidebarProvider',
             provider,
+            { webviewOptions: { retainContextWhenHidden: true } }
+        )
+    );
+
+    // Create and register the test provider
+    const testProvider = new TestProvider(context, outputChannel);
+    
+    context.subscriptions.push(
+        vscode.window.registerWebviewViewProvider(
+            'duvut-assistant-TestProvider',
+            testProvider,
             { webviewOptions: { retainContextWhenHidden: true } }
         )
     );
