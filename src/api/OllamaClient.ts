@@ -87,7 +87,7 @@ export class OllamaClient {
 
     private getMaxTokens(): number {
         const config = vscode.workspace.getConfiguration('duvut-assistant');
-        return config.get('maxTokens', 4000);
+        return config.get('maxTokens', 2000); // Reduced from 4000 to prevent loops
     }
 
     async listModels(): Promise<OllamaModel[]> {

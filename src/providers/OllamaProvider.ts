@@ -8,6 +8,21 @@ interface WebviewMessage {
     [key: string]: any;
 }
 
+// Planning-based workflow interfaces
+interface ActionStep {
+    stepNumber: number;
+    description: string;
+    tool: string;
+    parameters: string;
+    expectedOutcome: string;
+}
+
+interface ActionPlan {
+    needsTools: boolean;
+    description: string;
+    steps: ActionStep[];
+}
+
 export class OllamaProvider implements vscode.WebviewViewProvider {
     private _view?: vscode.WebviewView;
     private ollamaClient: OllamaClient;
@@ -197,98 +212,8 @@ export class OllamaProvider implements vscode.WebviewViewProvider {
                 content: content
             });
             
-            // Start streaming response
-            this._view.webview.postMessage({
-                type: 'assistantMessage',
-                streaming: true
-            });
-            
-            let fullResponse = '';
-            let inToolCall = false;
-            let currentToolCall = '';
-            let toolCallType = '';
-            
-            for await (const chunk of this.ollamaClient.chatStream(messages, model)) {
-                fullResponse += chunk;
-                
-                // Check for tool call start
-                if (chunk.includes('<read_file>') || chunk.includes('<write_file>') || chunk.includes('<open_file>')) {
-                    inToolCall = true;
-                    if (chunk.includes('<read_file>')) toolCallType = 'read_file';
-                    else if (chunk.includes('<write_file>')) toolCallType = 'write_file';
-                    else if (chunk.includes('<open_file>')) toolCallType = 'open_file';
-                }
-
-                if (inToolCall) {
-                    currentToolCall += chunk;
-                    
-                    // Check if tool call is complete
-                    if (currentToolCall.includes('</read_file>') || 
-                        currentToolCall.includes('</write_file>') || 
-                        currentToolCall.includes('</open_file>')) {
-                        
-                        // Process the complete tool call
-                        await this._processToolCall(currentToolCall, toolCallType);
-                        
-                        // Reset for next tool call
-                        currentToolCall = '';
-                        inToolCall = false;
-                        toolCallType = '';
-                    }
-                } else {
-                    // Simple streaming - just send the content as-is
-                    this._view.webview.postMessage({
-                        type: 'updateMessage',
-                        content: chunk
-                    });
-                }
-            }
-
-            // Add complete assistant response to history
-            this.chatHistory.push({ role: 'assistant', content: fullResponse });
-
-            // Process the complete response to format code blocks and detect recommendations
-            this._outputChannel.appendLine(`[DEBUG] Processing complete response for code blocks`);
-            const processedResponse = this._processCodeBlocks(fullResponse);
-            
-            // Detect code recommendations from the complete response
-            const recommendations = this._detectCodeRecommendations(fullResponse);
-            
-            // Prepare the final response with or without prompts
-            let finalResponse = processedResponse;
-            
-            // If we found recommendations, inject inline prompts into the processed response
-            if (recommendations.length > 0) {
-                this._outputChannel.appendLine(`[DEBUG] Found ${recommendations.length} recommendations, injecting inline prompts`);
-                
-                // Store recommendations for this request
-                this.pendingRecommendations.set(this.currentRequestId, recommendations);
-                
-                // Inject inline prompts into the processed response
-                for (const recommendation of recommendations) {
-                    const promptHtml = this._createInlinePromptHtml(recommendation, this.currentRequestId);
-                    this._outputChannel.appendLine(`[DEBUG] Created prompt HTML for ${recommendation.filePath}`);
-                    
-                    // Find the code block in the processed response and add the prompt after it
-                    // Use a simpler approach - find the last </code></pre> and add the prompt after it
-                    const lastCodeBlockIndex = finalResponse.lastIndexOf('</code></pre>');
-                    if (lastCodeBlockIndex !== -1) {
-                        const insertIndex = lastCodeBlockIndex + '</code></pre>'.length;
-                        finalResponse = finalResponse.slice(0, insertIndex) + promptHtml + finalResponse.slice(insertIndex);
-                        this._outputChannel.appendLine(`[DEBUG] Injected prompt after code block at index ${insertIndex}`);
-                    } else {
-                        this._outputChannel.appendLine(`[DEBUG] No code block found to inject prompt into`);
-                    }
-                }
-            } else {
-                this._outputChannel.appendLine(`[DEBUG] No code recommendations found`);
-            }
-            
-            // Send the final response (only once) - this prevents duplicates
-            this._view.webview.postMessage({
-                type: 'replaceStreamingMessage',
-                content: finalResponse
-            });
+            // Use planning-based workflow instead of direct streaming
+            await this._executePlanningWorkflow(content, model);
             
         } catch (error) {
             this._view.webview.postMessage({
@@ -750,7 +675,7 @@ Remember: You have full access to the workspace and can read, write, and open fi
         }
     }
 
-    private async _handleFileReadRequest(filePath: string) {
+    private async _handleFileReadRequest(filePath: string): Promise<string> {
         try {
             const content = await this.toolsService.readFile(filePath);
             const message = `File content for ${filePath}:\n\`\`\`\n${content}\n\`\`\``;
@@ -761,6 +686,7 @@ Remember: You have full access to the workspace and can read, write, and open fi
                     content: message
                 });
             }
+            return message;
         } catch (error) {
             const errorMessage = `Error reading file ${filePath}: ${error}`;
             if (this._view) {
@@ -769,10 +695,11 @@ Remember: You have full access to the workspace and can read, write, and open fi
                     message: errorMessage
                 });
             }
+            return errorMessage;
         }
     }
 
-    private async _handleFileWriteRequest(content: string) {
+    private async _handleFileWriteRequest(content: string): Promise<string> {
         try {
             // Extract file path and content from the write request
             const lines = content.split('\n');
@@ -788,6 +715,7 @@ Remember: You have full access to the workspace and can read, write, and open fi
                     content: message
                 });
             }
+            return message;
         } catch (error) {
             const errorMessage = `Error writing file: ${error}`;
             if (this._view) {
@@ -796,10 +724,11 @@ Remember: You have full access to the workspace and can read, write, and open fi
                     message: errorMessage
                 });
             }
+            return errorMessage;
         }
     }
 
-    private async _handleFileOpenRequest(filePath: string) {
+    private async _handleFileOpenRequest(filePath: string): Promise<string> {
         try {
             await this.toolsService.openFile(filePath);
             
@@ -810,6 +739,7 @@ Remember: You have full access to the workspace and can read, write, and open fi
                     content: message
                 });
             }
+            return message;
         } catch (error) {
             const errorMessage = `Error opening file ${filePath}: ${error}`;
             if (this._view) {
@@ -818,6 +748,271 @@ Remember: You have full access to the workspace and can read, write, and open fi
                     message: errorMessage
                 });
             }
+            return errorMessage;
+        }
+    }
+
+    private async _handleCommandExecutionRequest(command: string): Promise<string> {
+        try {
+            const result = await this.toolsService.executeCommand(command);
+            const message = `Command executed: ${command}\nExit code: ${result.exitCode}\nOutput: ${result.stdout}`;
+            
+            if (this._view) {
+                this._view.webview.postMessage({
+                    type: 'assistantMessage',
+                    content: message
+                });
+            }
+            return message;
+        } catch (error) {
+            const errorMessage = `Error executing command: ${error}`;
+            if (this._view) {
+                this._view.webview.postMessage({
+                    type: 'error',
+                    message: errorMessage
+                });
+            }
+            return errorMessage;
+        }
+    }
+
+    private async _handleGitStatusRequest(): Promise<string> {
+        try {
+            const result = await this.toolsService.getGitStatus();
+            const message = `Git Status: ${result.status}`;
+            
+            if (this._view) {
+                this._view.webview.postMessage({
+                    type: 'assistantMessage',
+                    content: message
+                });
+            }
+            return message;
+        } catch (error) {
+            const errorMessage = `Error getting git status: ${error}`;
+            if (this._view) {
+                this._view.webview.postMessage({
+                    type: 'error',
+                    message: errorMessage
+                });
+            }
+            return errorMessage;
+        }
+    }
+
+    private async _handleGitAddRequest(files: string): Promise<string> {
+        try {
+            const result = await this.toolsService.gitAdd(files);
+            const message = `Git Add: ${result.message}`;
+            
+            if (this._view) {
+                this._view.webview.postMessage({
+                    type: 'assistantMessage',
+                    content: message
+                });
+            }
+            return message;
+        } catch (error) {
+            const errorMessage = `Error adding files to git: ${error}`;
+            if (this._view) {
+                this._view.webview.postMessage({
+                    type: 'error',
+                    message: errorMessage
+                });
+            }
+            return errorMessage;
+        }
+    }
+
+    private async _handleGitCommitRequest(message: string): Promise<string> {
+        try {
+            const result = await this.toolsService.gitCommit(message);
+            const responseMessage = `Git Commit: ${result.message}`;
+            
+            if (this._view) {
+                this._view.webview.postMessage({
+                    type: 'assistantMessage',
+                    content: responseMessage
+                });
+            }
+            return responseMessage;
+        } catch (error) {
+            const errorMessage = `Error committing to git: ${error}`;
+            if (this._view) {
+                this._view.webview.postMessage({
+                    type: 'error',
+                    message: errorMessage
+                });
+            }
+            return errorMessage;
+        }
+    }
+
+    private async _handleGitPushRequest(options: string): Promise<string> {
+        try {
+            const result = await this.toolsService.gitPush();
+            const message = `Git Push: ${result.message}`;
+            
+            if (this._view) {
+                this._view.webview.postMessage({
+                    type: 'assistantMessage',
+                    content: message
+                });
+            }
+            return message;
+        } catch (error) {
+            const errorMessage = `Error pushing to git: ${error}`;
+            if (this._view) {
+                this._view.webview.postMessage({
+                    type: 'error',
+                    message: errorMessage
+                });
+            }
+            return errorMessage;
+        }
+    }
+
+    private async _handleGitPullRequest(options: string): Promise<string> {
+        try {
+            const result = await this.toolsService.gitPull();
+            const message = `Git Pull: ${result.message}`;
+            
+            if (this._view) {
+                this._view.webview.postMessage({
+                    type: 'assistantMessage',
+                    content: message
+                });
+            }
+            return message;
+        } catch (error) {
+            const errorMessage = `Error pulling from git: ${error}`;
+            if (this._view) {
+                this._view.webview.postMessage({
+                    type: 'error',
+                    message: errorMessage
+                });
+            }
+            return errorMessage;
+        }
+    }
+
+    private async _handleGitBranchRequest(branchName: string): Promise<string> {
+        try {
+            const result = await this.toolsService.gitCreateBranch(branchName, { checkout: true });
+            const message = `Git Branch: ${result.message}`;
+            
+            if (this._view) {
+                this._view.webview.postMessage({
+                    type: 'assistantMessage',
+                    content: message
+                });
+            }
+            return message;
+        } catch (error) {
+            const errorMessage = `Error creating git branch: ${error}`;
+            if (this._view) {
+                this._view.webview.postMessage({
+                    type: 'error',
+                    message: errorMessage
+                });
+            }
+            return errorMessage;
+        }
+    }
+
+    private async _handleGitCheckoutRequest(branchName: string): Promise<string> {
+        try {
+            const result = await this.toolsService.gitCheckout(branchName);
+            const message = `Git Checkout: ${result.message}`;
+            
+            if (this._view) {
+                this._view.webview.postMessage({
+                    type: 'assistantMessage',
+                    content: message
+                });
+            }
+            return message;
+        } catch (error) {
+            const errorMessage = `Error checking out git branch: ${error}`;
+            if (this._view) {
+                this._view.webview.postMessage({
+                    type: 'error',
+                    message: errorMessage
+                });
+            }
+            return errorMessage;
+        }
+    }
+
+    private async _handleGitLogRequest(options: string): Promise<string> {
+        try {
+            const result = await this.toolsService.gitLog();
+            const message = `Git Log: ${result.log}`;
+            
+            if (this._view) {
+                this._view.webview.postMessage({
+                    type: 'assistantMessage',
+                    content: message
+                });
+            }
+            return message;
+        } catch (error) {
+            const errorMessage = `Error getting git log: ${error}`;
+            if (this._view) {
+                this._view.webview.postMessage({
+                    type: 'error',
+                    message: errorMessage
+                });
+            }
+            return errorMessage;
+        }
+    }
+
+    private async _handleGitDiffRequest(options: string): Promise<string> {
+        try {
+            const result = await this.toolsService.gitDiff();
+            const message = `Git Diff: ${result.diff}`;
+            
+            if (this._view) {
+                this._view.webview.postMessage({
+                    type: 'assistantMessage',
+                    content: message
+                });
+            }
+            return message;
+        } catch (error) {
+            const errorMessage = `Error getting git diff: ${error}`;
+            if (this._view) {
+                this._view.webview.postMessage({
+                    type: 'error',
+                    message: errorMessage
+                });
+            }
+            return errorMessage;
+        }
+    }
+
+    private async _handleGitRemoteRequest(): Promise<string> {
+        try {
+            const result = await this.toolsService.gitRemote();
+            const message = `Git Remotes: ${JSON.stringify(result.remotes)}`;
+            
+            if (this._view) {
+                this._view.webview.postMessage({
+                    type: 'assistantMessage',
+                    content: message
+                });
+            }
+            return message;
+        } catch (error) {
+            const errorMessage = `Error getting git remotes: ${error}`;
+            if (this._view) {
+                this._view.webview.postMessage({
+                    type: 'error',
+                    message: errorMessage
+                });
+            }
+            return errorMessage;
         }
     }
 
@@ -2240,6 +2435,278 @@ And more text here.`;
         } else {
             this._outputChannel.appendLine(`[DEBUG] Webview not available for inline prompt`);
         }
+    }
+
+    // Planning-based workflow methods
+    private async _executePlanningWorkflow(userRequest: string, model: string) {
+        if (!this._view) return;
+        
+        try {
+            // Phase 1: Analysis and Planning
+            this._view.webview.postMessage({
+                type: 'assistantMessage',
+                streaming: true
+            });
+            
+            this._view.webview.postMessage({
+                type: 'updateMessage',
+                content: '🤔 **Analyzing your request and creating an action plan...**\n\n'
+            });
+
+            const actionPlan = await this._createActionPlan(userRequest, model);
+            
+            if (!actionPlan || actionPlan.steps.length === 0) {
+                // No tools needed, proceed with normal response
+                this._view.webview.postMessage({
+                    type: 'updateMessage',
+                    content: '📝 **No tools needed - providing direct response...**\n\n'
+                });
+                await this._handleSimpleResponse(userRequest, model);
+                return;
+            }
+
+            // Phase 2: Execute the plan
+            this._view.webview.postMessage({
+                type: 'updateMessage',
+                content: `📋 **Action Plan Created**\n\n${actionPlan.description}\n\n**Steps to execute:**\n${actionPlan.steps.map((step, i) => `${i + 1}. ${step.description}`).join('\n')}\n\n🚀 **Executing plan...**\n\n`
+            });
+
+            let executionResults = '';
+            
+            for (let i = 0; i < actionPlan.steps.length; i++) {
+                const step = actionPlan.steps[i];
+                
+                this._view.webview.postMessage({
+                    type: 'updateMessage',
+                    content: `**Step ${i + 1}/${actionPlan.steps.length}**: ${step.description}\n\n`
+                });
+
+                try {
+                    const stepResult = await this._executeStep(step, model);
+                    executionResults += `**Step ${i + 1} Result**: ${stepResult}\n\n`;
+                    
+                    this._view.webview.postMessage({
+                        type: 'updateMessage',
+                        content: `✅ **Step ${i + 1} completed**\n\n${stepResult}\n\n`
+                    });
+                } catch (stepError) {
+                    const errorMsg = `❌ **Step ${i + 1} failed**: ${stepError}\n\n`;
+                    executionResults += errorMsg;
+                    
+                    this._view.webview.postMessage({
+                        type: 'updateMessage',
+                        content: errorMsg
+                    });
+                }
+            }
+
+            // Phase 3: Summary
+            this._view.webview.postMessage({
+                type: 'updateMessage',
+                content: `🎉 **Plan execution completed!**\n\n${executionResults}`
+            });
+
+            // Add to chat history
+            this.chatHistory.push({ 
+                role: 'assistant', 
+                content: `**Action Plan**: ${actionPlan.description}\n\n**Execution Results**:\n${executionResults}` 
+            });
+
+        } catch (error) {
+            this._outputChannel.appendLine(`Error in planning workflow: ${error}`);
+            this._view.webview.postMessage({
+                type: 'updateMessage',
+                content: `❌ **Planning failed, falling back to direct response...**\n\n`
+            });
+            
+            // Fallback to simple response
+            await this._handleSimpleResponse(userRequest, model);
+        }
+    }
+
+    private async _createActionPlan(userRequest: string, model: string): Promise<ActionPlan | null> {
+        const workspaceContext = await this._getWorkspaceContext();
+        
+        // First try heuristic-based planning for common patterns
+        const heuristicPlan = this._createHeuristicPlan(userRequest);
+        if (heuristicPlan) {
+            this._outputChannel.appendLine(`[DEBUG] Using heuristic-based plan for: ${userRequest}`);
+            return heuristicPlan;
+        }
+        
+        // Simplified planning prompt for faster response
+        const planningPrompt = `Analyze this request and respond with either "SIMPLE_RESPONSE" or a JSON action plan.
+
+**Tools:** read_file, write_file, execute_command, git_status, git_add, git_commit, git_push, git_pull, git_branch, git_checkout, git_log, git_diff, git_remote
+
+**Request:** ${userRequest}
+
+**Context:** ${workspaceContext.substring(0, 500)}...
+
+**Response format:**
+- For text-only requests: "SIMPLE_RESPONSE"
+- For tool requests: {"needsTools":true,"description":"Brief description","steps":[{"stepNumber":1,"description":"Step description","tool":"tool_name","parameters":"params","expectedOutcome":"outcome"}]}`;
+
+        const messages: ChatMessage[] = [
+            { role: 'system', content: planningPrompt },
+            { role: 'user', content: userRequest }
+        ];
+
+        try {
+            // Use longer timeout for planning (15 seconds)
+            const response = await this.ollamaClient.chat(messages, model, 15000);
+            
+            if (response.includes('SIMPLE_RESPONSE')) {
+                return null;
+            }
+
+            // Try to parse the JSON response
+            const jsonMatch = response.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+                const planData = JSON.parse(jsonMatch[0]);
+                return planData as ActionPlan;
+            }
+
+            return null;
+        } catch (error) {
+            this._outputChannel.appendLine(`Error creating action plan: ${error}`);
+            return null;
+        }
+    }
+
+    private _createHeuristicPlan(userRequest: string): ActionPlan | null {
+        const request = userRequest.toLowerCase();
+        
+        // Git-related requests
+        if (request.includes('git') || request.includes('add') || request.includes('commit') || request.includes('push')) {
+            if (request.includes('status') || request.includes('check')) {
+                return {
+                    needsTools: true,
+                    description: "Check git repository status",
+                    steps: [{
+                        stepNumber: 1,
+                        description: "Check current git status",
+                        tool: "git_status",
+                        parameters: "",
+                        expectedOutcome: "Get repository status and branch information"
+                    }]
+                };
+            }
+            
+            if (request.includes('add') && request.includes('git')) {
+                return {
+                    needsTools: true,
+                    description: "Add files to git repository",
+                    steps: [{
+                        stepNumber: 1,
+                        description: "Add files to git staging area",
+                        tool: "git_add",
+                        parameters: ".",
+                        expectedOutcome: "Stage all changes for commit"
+                    }]
+                };
+            }
+        }
+        
+        // File reading requests
+        if (request.includes('read') || request.includes('show') || request.includes('view')) {
+            if (request.includes('file')) {
+                return {
+                    needsTools: true,
+                    description: "Read file contents",
+                    steps: [{
+                        stepNumber: 1,
+                        description: "Read the specified file",
+                        tool: "read_file",
+                        parameters: "main.py", // Default to main.py, could be improved
+                        expectedOutcome: "Display file contents"
+                    }]
+                };
+            }
+        }
+        
+        // Command execution requests
+        if (request.includes('run') || request.includes('execute') || request.includes('command')) {
+            return {
+                needsTools: true,
+                description: "Execute terminal command",
+                steps: [{
+                    stepNumber: 1,
+                    description: "Run the specified command",
+                    tool: "execute_command",
+                    parameters: userRequest.replace(/^(run|execute|command)\s+/i, ''),
+                    expectedOutcome: "Execute command and show output"
+                }]
+            };
+        }
+        
+        return null;
+    }
+
+    private async _executeStep(step: ActionStep, model: string): Promise<string> {
+        try {
+            switch (step.tool) {
+                case 'read_file':
+                    return await this._handleFileReadRequest(step.parameters);
+                case 'write_file':
+                    return await this._handleFileWriteRequest(step.parameters);
+                case 'execute_command':
+                    return await this._handleCommandExecutionRequest(step.parameters);
+                case 'git_status':
+                    return await this._handleGitStatusRequest();
+                case 'git_add':
+                    return await this._handleGitAddRequest(step.parameters);
+                case 'git_commit':
+                    return await this._handleGitCommitRequest(step.parameters);
+                case 'git_push':
+                    return await this._handleGitPushRequest(step.parameters);
+                case 'git_pull':
+                    return await this._handleGitPullRequest(step.parameters);
+                case 'git_branch':
+                    return await this._handleGitBranchRequest(step.parameters);
+                case 'git_checkout':
+                    return await this._handleGitCheckoutRequest(step.parameters);
+                case 'git_log':
+                    return await this._handleGitLogRequest(step.parameters);
+                case 'git_diff':
+                    return await this._handleGitDiffRequest(step.parameters);
+                case 'git_remote':
+                    return await this._handleGitRemoteRequest();
+                default:
+                    return `Unknown tool: ${step.tool}`;
+            }
+        } catch (error) {
+            return `Error executing step: ${error}`;
+        }
+    }
+
+    private async _handleSimpleResponse(userRequest: string, model: string) {
+        if (!this._view) return;
+        
+        const workspaceContext = await this._getWorkspaceContext();
+        
+        const messages: ChatMessage[] = [
+            { role: 'system', content: this._getSystemPrompt() },
+            { role: 'user', content: `Workspace Context:\n${workspaceContext}\n\nUser Request:\n${userRequest}` }
+        ];
+
+        // Add conversation history
+        const recentHistory = this.chatHistory.slice(-10);
+        for (let i = 0; i < recentHistory.length - 1; i++) {
+            messages.push(recentHistory[i]);
+        }
+
+        let fullResponse = '';
+        
+        for await (const chunk of this.ollamaClient.chatStream(messages, model)) {
+            fullResponse += chunk;
+            this._view.webview.postMessage({
+                type: 'updateMessage',
+                content: chunk
+            });
+        }
+
+        this.chatHistory.push({ role: 'assistant', content: fullResponse });
     }
 }
 

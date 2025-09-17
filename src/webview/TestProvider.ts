@@ -48,6 +48,9 @@ export class TestProvider implements vscode.WebviewViewProvider {
                     case 'runAllTests':
                         this.runAllTests();
                         break;
+                    case 'runPlanningWorkflowTests':
+                        this.runPlanningWorkflowTests(message.modelName);
+                        break;
                     case 'getTestResults':
                         this.sendTestResults(message.modelName);
                         break;
@@ -135,6 +138,30 @@ export class TestProvider implements vscode.WebviewViewProvider {
             this._view.webview.postMessage({
                 command: 'error',
                 message: `Failed to run all tests: ${error}`
+            });
+        }
+    }
+
+    private async runPlanningWorkflowTests(modelName: string) {
+        if (!this._view) return;
+
+        this._view.webview.postMessage({
+            command: 'testStarted',
+            message: `Running Planning Workflow tests with model: ${modelName}`
+        });
+
+        try {
+            const results = await this.testService.runTestSuite('planning-workflow', modelName);
+            
+            this._view.webview.postMessage({
+                command: 'testCompleted',
+                results: results
+            });
+
+        } catch (error) {
+            this._view.webview.postMessage({
+                command: 'error',
+                message: `Failed to run planning workflow tests: ${error}`
             });
         }
     }
@@ -328,6 +355,18 @@ export class TestProvider implements vscode.WebviewViewProvider {
             color: var(--vscode-foreground);
         }
 
+        .status.tool-execution {
+            background-color: var(--vscode-editor-background);
+            color: var(--vscode-descriptionForeground);
+            border: 1px solid var(--vscode-panel-border);
+            font-size: 0.9em;
+            font-weight: normal;
+        }
+
+        .tool-execution {
+            color: var(--vscode-descriptionForeground);
+        }
+
         .results {
             margin-top: 20px;
         }
@@ -477,6 +516,7 @@ export class TestProvider implements vscode.WebviewViewProvider {
         <h3>Test Controls</h3>
         <div>
             <button class="button" id="runAllTests">Run All Tests</button>
+            <button class="button" id="runPlanningTests">Test Planning Workflow</button>
             <button class="button" id="clearResults">Clear Results</button>
             <button class="button" id="showOutput">Show Output</button>
         </div>
@@ -534,6 +574,9 @@ export class TestProvider implements vscode.WebviewViewProvider {
                     break;
                 case 'error':
                     showStatus(message.message, 'error');
+                    break;
+                case 'toolExecution':
+                    showToolExecution(message.content);
                     break;
             }
         });
@@ -671,6 +714,13 @@ export class TestProvider implements vscode.WebviewViewProvider {
             }
         }
 
+        function showToolExecution(toolInfo) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.innerHTML = \`<span class="tool-execution">🔧 \${toolInfo}</span>\`;
+            statusDiv.className = 'status tool-execution';
+            statusDiv.classList.remove('hidden');
+        }
+
         function hideResults() {
             document.getElementById('results').classList.add('hidden');
         }
@@ -686,6 +736,11 @@ export class TestProvider implements vscode.WebviewViewProvider {
         // Event listeners
         document.getElementById('runAllTests').addEventListener('click', () => {
             vscode.postMessage({ command: 'runAllTests' });
+        });
+
+        document.getElementById('runPlanningTests').addEventListener('click', () => {
+            const selectedModel = document.getElementById('modelSelect').value;
+            vscode.postMessage({ command: 'runPlanningWorkflowTests', modelName: selectedModel });
         });
 
         document.getElementById('clearResults').addEventListener('click', () => {
